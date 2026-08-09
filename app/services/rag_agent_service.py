@@ -6,6 +6,7 @@
 
 from typing import Annotated, Any, AsyncGenerator, Dict, Sequence
 
+from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain_core.messages import (
     BaseMessage,
@@ -82,6 +83,7 @@ class RagAgentService:
     """RAG Agent 服务 - 使用 LangGraph + ChatQwen 原生集成"""
 
     def __init__(self, streaming: bool = True):
+        load_dotenv()
         """初始化 RAG Agent 服务
 
         Args:

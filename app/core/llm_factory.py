@@ -9,6 +9,7 @@
 - Azure OpenAI: https://{resource}.openai.azure.com
 - 其他兼容 OpenAI API 的服务
 """
+import os
 
 from langchain_openai import ChatOpenAI
 from app.config import config
@@ -34,15 +35,18 @@ class LLMFactory:
         api_key = api_key or config.dashscope_api_key
 
         # 参考：https://help.aliyun.com/zh/model-studio/getting-started/models
-        extra_body = {}
+        extra_body = {"thinking":{
+            "type":"enable"}}
         extra_body["stream"] = streaming
 
+
+
         llm = ChatOpenAI(
-            model=model,
+            model="deepseek-v4-flash",
             temperature=temperature,
             streaming=streaming,
-            base_url=base_url,
-            api_key=api_key,
+            base_url=os.getenv("DEEPSEEK_API_KEY"),
+            api_key=os.getenv("DEEPSEEK_BASE_URL"),
             extra_body=extra_body if extra_body else None,
         )
 

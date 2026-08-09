@@ -14,7 +14,7 @@ class MilvusClientManager:
     """Milvus 客户端管理器（纯 MilvusClient 实现，无过时 API）"""
 
     # 常量定义
-    COLLECTION_NAME: str = "biz"
+    COLLECTION_NAME: str = "OnCall"
     VECTOR_DIM: int = 1024  # 统一使用 1024 维
     ID_MAX_LENGTH: int = 100
     CONTENT_MAX_LENGTH: int = 8000
@@ -45,8 +45,6 @@ class MilvusClientManager:
 
         try:
             uri = f"http://{config.milvus_host}:{config.milvus_port}"
-            print(config.milvus_host)
-
             logger.info(f"正在连接到 Milvusasd: {config.milvus_host}:{config.milvus_port}")
 
             self._client = MilvusClient(uri=uri)
@@ -163,7 +161,9 @@ class MilvusClientManager:
         """
         if self._client is None:
             raise RuntimeError("客户端未初始化，请先调用 connect()")
-        result = self._client.insert(collection_name=self.COLLECTION_NAME, data=data)
+        result = self._client.insert(
+            collection_name=self.COLLECTION_NAME,
+            data=data)
         return result
 
     def search(
