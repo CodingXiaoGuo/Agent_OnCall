@@ -35,18 +35,22 @@ class LLMFactory:
         api_key = api_key or config.dashscope_api_key
 
         # 参考：https://help.aliyun.com/zh/model-studio/getting-started/models
-        extra_body = {"thinking":{
-            "type":"enable"}}
+        # extra_body = {"thinking":{
+        #     "type":"enable"}}
+        extra_body={}
         extra_body["stream"] = streaming
 
 
 
         llm = ChatOpenAI(
-            model="deepseek-v4-flash",
+            # model="deepseek-v4-flash",
+            model=model,
             temperature=temperature,
             streaming=streaming,
-            base_url=os.getenv("DEEPSEEK_API_KEY"),
-            api_key=os.getenv("DEEPSEEK_BASE_URL"),
+            # base_url=os.getenv("DEEPSEEK_API_KEY"),
+            # api_key=os.getenv("DEEPSEEK_BASE_URL"),
+            base_url=base_url,
+            api_key=api_key,
             extra_body=extra_body if extra_body else None,
         )
 
