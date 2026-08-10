@@ -107,8 +107,10 @@ class RagAgentService:
         # MCP 客户端（延迟初始化，使用全局管理）
         self.mcp_tools: list = []
 
-        # 创建内存检查点（用于会话管理）
+        # 创建内存检查点（用于会话管理），若配置了 PostgreSQL 则在异步初始化时替换为持久化检查点
         self.checkpointer = MemorySaver()
+        self._pg_conn = None
+        self._checkpointer_init_done = False
 
         # Agent 初始化（会在异步方法中完成）
         self.agent = None
@@ -116,10 +118,47 @@ class RagAgentService:
 
         logger.info(f"RAG Agent 服务初始化完成 (ChatQwen), model={self.model_name}, streaming={streaming}")
 
+    async def _init_pg_checkpointer(self):
+        """初始化 PostgreSQL 检查点（会话历史持久化）
+
+        配置了 pg_conn_string 时使用 AsyncPostgresSaver，失败则回退内存并记日志。
+        只尝试一次，避免每次请求都重连。
+        """
+        if self._checkpointer_init_done:
+            return
+        self._checkpointer_init_done = True
+
+        if not config.pg_conn_string:
+            logger.info("未配置 PG_CONN_STRING，会话历史使用内存模式 (MemorySaver)")
+            return
+
+        try:
+            import psycopg
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            from psycopg.rows import dict_row
+
+            conn = await psycopg.AsyncConnection.connect(
+                config.pg_conn_string,
+                autocommit=True,
+                prepare_threshold=0,
+                row_factory=dict_row,
+            )
+            saver = AsyncPostgresSaver(conn)
+            await saver.setup()  # 首次自动建表
+            self._pg_conn = conn
+            self.checkpointer = saver
+            logger.info("会话历史持久化已启用: PostgreSQL")
+        except Exception as e:
+            logger.error(f"PostgreSQL 检查点初始化失败，回退内存模式: {e}")
+            self.checkpointer = MemorySaver()
+
     async def _initialize_agent(self):
         """异步初始化 Agent（包括 MCP 工具）"""
         if self._agent_initialized:
             return
+
+        # 先初始化检查点（PG 或内存回退），再编译 Agent
+        await self._init_pg_checkpointer()
 
         for name, server in config.mcp_servers.items():
             hint = suggest_mcp_transport(
@@ -320,9 +359,9 @@ class RagAgentService:
             )
             yield {"type": "error", "data": detail}
 
-    def get_session_history(self, session_id: str) -> list:
+    async def get_session_history(self, session_id: str) -> list:
         """
-        获取会话历史（从 MemorySaver checkpointer 中读取）
+        获取会话历史（从 checkpointer 中读取，MemorySaver 或 PostgreSQL）
 
         Args:
             session_id: 会话ID（即 thread_id）
@@ -331,24 +370,19 @@ class RagAgentService:
             list: 消息历史列表 [{"role": "user|assistant", "content": "...", "timestamp": "..."}]
         """
         try:
-            # 使用 checkpointer 的 get 方法获取最新的检查点
+            # 确保检查点已初始化（PG 或内存），避免首次请求时读到旧实例
+            await self._init_pg_checkpointer()
+
+            # 使用 checkpointer 的 aget 方法获取最新的检查点
             config = {"configurable": {"thread_id": session_id}}
-            
-            # 获取该 thread 的最新检查点
-            checkpoint_tuple = self.checkpointer.get(config)
-            
-            if not checkpoint_tuple:
+
+            # 获取该 thread 的最新检查点（aget 直接返回 Checkpoint 字典）
+            checkpoint_data = await self.checkpointer.aget(config)
+
+            if not checkpoint_data:
                 logger.info(f"获取会话历史: {session_id}, 消息数量: 0")
                 return []
-            
-            # checkpoint_tuple 可能是命名元组或普通元组，安全地提取 checkpoint
-            # 通常第一个元素是 checkpoint 数据
-            if hasattr(checkpoint_tuple, 'checkpoint'):
-                checkpoint_data = checkpoint_tuple.checkpoint  # type: ignore
-            else:
-                # 如果是普通元组，第一个元素是 checkpoint
-                checkpoint_data = checkpoint_tuple[0] if checkpoint_tuple else {}
-            
+
             # 从检查点中提取消息
             messages = checkpoint_data.get("channel_values", {}).get("messages", [])
             
@@ -385,9 +419,9 @@ class RagAgentService:
             logger.error(f"获取会话历史失败: {session_id}, 错误: {e}")
             return []
 
-    def clear_session(self, session_id: str) -> bool:
+    async def clear_session(self, session_id: str) -> bool:
         """
-        清空会话历史（从 MemorySaver checkpointer 中删除）
+        清空会话历史（从 checkpointer 中删除，MemorySaver 或 PostgreSQL）
 
         Args:
             session_id: 会话ID（即 thread_id）
@@ -396,8 +430,11 @@ class RagAgentService:
             bool: 是否成功
         """
         try:
-            # 使用 checkpointer 的 delete_thread 方法删除该 thread 的所有检查点
-            self.checkpointer.delete_thread(session_id)
+            # 确保检查点已初始化，避免清的是旧的内存实例
+            await self._init_pg_checkpointer()
+
+            # 使用 checkpointer 的 adelete_thread 方法删除该 thread 的所有检查点
+            await self.checkpointer.adelete_thread(session_id)
             
             logger.info(f"已清除会话历史: {session_id}")
             return True
@@ -410,6 +447,11 @@ class RagAgentService:
         """清理资源"""
         try:
             logger.info("清理 RAG Agent 服务资源...")
+            # 关闭 PostgreSQL 连接（如果启用了持久化）
+            if self._pg_conn is not None:
+                await self._pg_conn.close()
+                self._pg_conn = None
+                logger.info("已关闭 PostgreSQL 连接")
             # MCP 客户端由全局管理器统一管理，无需手动清理
             logger.info("RAG Agent 服务资源已清理")
         except Exception as e:

@@ -3,6 +3,14 @@
 主应用程序，配置路由、中间件、静态文件等
 """
 
+# Windows 下 psycopg 异步模式要求 SelectorEventLoop（默认的 ProactorEventLoop 不支持）。
+# 必须在事件循环创建之前设置；本项目无 asyncio 子进程需求（MCP 走 streamable-http），切换安全。
+import asyncio
+import sys
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # 图片解析用的多模态模型（支持视觉的 OpenAI 兼容模型）
     vision_model: str = "qwen-vl-max"
 
+    # PostgreSQL 检查点连接串（会话历史持久化；留空则回退内存 MemorySaver）
+    pg_conn_string: str = ""
+
     # Milvus 配置
     milvus_host: str = "192.168.150.102"
     milvus_port: int = 19530
